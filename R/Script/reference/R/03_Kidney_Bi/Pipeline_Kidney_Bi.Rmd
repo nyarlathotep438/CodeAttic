@@ -1,0 +1,180 @@
+---
+title: "R Notebook"
+output: html_notebook
+editor_options: 
+  chunk_output_type: inline
+---
+
+
+## Reading the scRNA-seq data
+
+# reading the data
+```{r}
+
+Bi_whole_cluster <- read.csv("/mctp/share/users/gondal/01_scHLA/01_input/Kidney_Bi_et_al/Bi.txt", 
+         sep = "\t")
+Bi_whole_cluster <- Bi_whole_cluster[-c(1),]
+row.names(Bi_whole_cluster) <- Bi_whole_cluster$NAME
+Bi_whole_cluster$NAME <- NULL
+
+
+
+cts <- ReadMtx(mtx ="/mctp/share/users/gondal/01_scHLA/01_input/Kidney_Bi_et_al/matrix.mtx",
+          features = "/mctp/share/users/gondal/01_scHLA/01_input/Kidney_Bi_et_al/genes.tsv", 
+          cells = "/mctp/share/users/gondal/01_scHLA/01_input/Kidney_Bi_et_al/barcodes.tsv")
+  
+Bi_seurat <- CreateSeuratObject(counts = cts)
+Bi_seurat_md <- AddMetaData(Bi_seurat, Bi_whole_cluster)
+
+Bi_seurat_md_na <-  subset(x = Bi_seurat_md, subset = species__ontology_label == "Homo sapiens")
+
+md <- read.csv("/mctp/share/users/gondal/01_scHLA/01_input/Kidney_Bi_et_al/Meta-data_Bi2021_Kidney.csv", 
+         sep = ",")
+
+Bi_seurat_md_na_MD <- Bi_seurat_md_na@meta.data
+
+Bi_seurat_md_na_MD$cell_id <- rownames(Bi_seurat_md_na_MD)
+
+Bi_seurat_md_na_MD <- merge(Bi_seurat_md_na_MD, md, by.x = "donor_id", by.y = "sample")
+rownames(Bi_seurat_md_na_MD) <- Bi_seurat_md_na_MD$cell_id
+
+Bi_seurat_md_na <- AddMetaData(Bi_seurat_md_na, Bi_seurat_md_na_MD)
+
+```
+
+## Finding total cell and total immune cells per patient
+```{r}
+
+Bi_seurat_md_na_meta <- Bi_seurat_md_na@meta.data
+
+CD8 <- c("41BB-Hi CD8+ T cell", "41BB-Lo CD8+ T cell", "Cycling CD8+ T cell", "MitoHigh CD8+ T cell", "MX1-Hi CD8+ T cell")
+
+Bi_seurat_md_na_meta$FinalCellType_update <- ifelse(Bi_seurat_md_na_meta$FinalCellType %in% CD8, "CD_8T", Bi_seurat_md_na_meta$FinalCellType)
+
+# CD8
+dat_total_celltypes <- data.frame(aggregate(cbind(donor_id == FinalCellType_update) ~  donor_id + FinalCellType_update, Bi_seurat_md_na_meta, length))
+dat_total_celltypes_CD8 <- filter(dat_total_celltypes, dat_total_celltypes$FinalCellType_update == "CD_8T")
+colnames(dat_total_celltypes_CD8) <- c("sample_id" , "cell_type_for_count", "total_T_Cell")
+
+# T
+Tcells <- c("41BB-Hi CD8+ T cell", "41BB-Lo CD8+ T cell", "Cycling CD8+ T cell", "MitoHigh CD8+ T cell", "MX1-Hi CD8+ T cell", "Effector T-Helper", "Memory T-Helper", "MitoHigh T-Helper", "T-Reg")
+Bi_seurat_md_na_meta$cluster_update_T <- ifelse(Bi_seurat_md_na_meta$FinalCellType %in% Tcells, "T_cells", Bi_seurat_md_na_meta$FinalCellType)
+
+dat_total_celltypes <- data.frame(aggregate(cbind(donor_id == cluster_update_T) ~  donor_id + cluster_update_T, Bi_seurat_md_na_meta, length))
+dat_total_celltypes_T <- filter(dat_total_celltypes, dat_total_celltypes$cluster_update_T == "T_cells")
+colnames(dat_total_celltypes_T) <- c("sample_id" , "cell_type_for_count", "total_T_Cell_only")
+
+dat_total_celltypes_CD8_T <- merge(dat_total_celltypes_CD8, dat_total_celltypes_T, by = "sample_id")
+
+#Total
+dat_total_cell <- data.frame(aggregate(cbind(donor_id == donor_id) ~  donor_id, Bi_seurat_md_na_meta , length))
+colnames(dat_total_cell) <- c("sample_id", "total_cell_per_patient")
+#Merge CD8 + total
+dat_total_cell_CD8 <- merge(dat_total_cell, dat_total_celltypes_CD8_T, by = "sample_id")
+dat_total_cell_CD8$total_T_Cell <- as.numeric(dat_total_cell_CD8$total_T_Cell)
+
+# only patient which are in the seurat object as well
+Bi_seurat_md_na_tumor_subset_ccRCC_patients <- as.data.frame(table(Bi_seurat_md_na_tumor_subset_ccRCC$sample_id))
+Bi_seurat_md_na_tumor_subset_ccRCC_patients$Var <- as.character(Bi_seurat_md_na_tumor_subset_ccRCC_patients$Var1)
+patients <- Bi_seurat_md_na_tumor_subset_ccRCC_patients$Var 
+dat_total_cell_CD8_filtered <- filter(dat_total_cell_CD8, dat_total_cell_CD8$sample_id %in% patients)
+```
+
+
+## separating tumor and normal in seurat object - cancer
+```{r}
+
+Bi_seurat_md_na_tumor <-  subset(x = Bi_seurat_md_na, subset = Lineage == "Putative Tumor")
+Bi_seurat_md_na_tumor <-  subset(x = Bi_seurat_md_na_tumor, subset = FinalCellType != "Misc/Undetermined")
+
+## removing samples with less than 20 cells
+Bi_seurat_md_na_tumor_md <- Bi_seurat_md_na_tumor@meta.data
+Bi_seurat_md_na_tumor_md_subset <- Bi_seurat_md_na_tumor_md[Bi_seurat_md_na_tumor_md$donor_id %in% names(which(table(Bi_seurat_md_na_tumor_md$donor_id) > 20)), ]
+
+Bi_seurat_md_na_tumor$enough_cells <- ifelse(Bi_seurat_md_na_tumor$donor_id %in% Bi_seurat_md_na_tumor_md_subset$donor_id, "enough", "not_enough")
+
+Bi_seurat_md_na_tumor_subset <-  subset(x = Bi_seurat_md_na_tumor, subset = enough_cells == "enough")
+
+Bi_seurat_md_na_tumor_subset_ccRCC <-  subset(x = Bi_seurat_md_na_tumor_subset, subset = disease__ontology_label != "papillary renal cell carcinoma")
+
+## relabeling
+Bi_seurat_md_na_tumor_subset_ccRCC$pre_post <- ifelse(Bi_seurat_md_na_tumor_subset_ccRCC$treated_naive == "naive", "Pre", "Post")
+
+Bi_seurat_md_na_tumor_subset_ccRCC$Study_name <- "Bi"
+Bi_seurat_md_na_tumor_subset_ccRCC$Cancer_type <- "ccRCC"
+
+Bi_seurat_md_na_tumor_subset_ccRCC$Primary_or_met <- "Metastatic"
+
+Bi_seurat_md_na_tumor_subset_ccRCC@meta.data <- dplyr::rename(Bi_seurat_md_na_tumor_subset_ccRCC@meta.data , c(sample_id = donor_id) )
+
+
+Bi_seurat_md_na_tumor_subset_ccRCC$sample_id_pre_post <- paste0(Bi_seurat_md_na_tumor_subset_ccRCC$sample_id, "_", Bi_seurat_md_na_tumor_subset_ccRCC$pre_post )
+
+
+Bi_seurat_md_na_tumor_subset_ccRCC$outcome <- ifelse(Bi_seurat_md_na_tumor_subset_ccRCC$ICB_Response == "NoICB", 
+                                                      "Untreated", Bi_seurat_md_na_tumor_subset_ccRCC$ICB_Response)
+
+Bi_seurat_md_na_tumor_subset_ccRCC$outcome <- ifelse(Bi_seurat_md_na_tumor_subset_ccRCC$outcome =="ICB_PR", "PR", Bi_seurat_md_na_tumor_subset_ccRCC$outcome)
+Bi_seurat_md_na_tumor_subset_ccRCC$outcome <- ifelse(Bi_seurat_md_na_tumor_subset_ccRCC$outcome =="Untreated", "UT", Bi_seurat_md_na_tumor_subset_ccRCC$outcome)
+Bi_seurat_md_na_tumor_subset_ccRCC$outcome <- ifelse(Bi_seurat_md_na_tumor_subset_ccRCC$outcome =="ICB_SD", "SD", Bi_seurat_md_na_tumor_subset_ccRCC$outcome)
+
+
+### adding immune + total cells
+Bi_seurat_md_na_tumor_subset_ccRCC_MD <- Bi_seurat_md_na_tumor_subset_ccRCC@meta.data
+
+Immune_cell_info <- merge(Bi_seurat_md_na_tumor_subset_ccRCC_MD, dat_total_cell_CD8_filtered, by = "sample_id")
+Immune_cell_info <- Immune_cell_info[,c("cell_id", colnames(dat_total_cell_CD8_filtered))]
+rownames(Immune_cell_info) <- Immune_cell_info$cell_id
+Immune_cell_info <- Immune_cell_info[,-c(1:2)]
+
+Bi_seurat_md_na_tumor_subset_ccRCC <- AddMetaData(Bi_seurat_md_na_tumor_subset_ccRCC, Immune_cell_info)
+
+## normalizing CD8 abundance
+Bi_seurat_md_na_tumor_subset_ccRCC@meta.data$normalized_CD8_actual_totalcells <- Bi_seurat_md_na_tumor_subset_ccRCC@meta.data$total_T_Cell/Bi_seurat_md_na_tumor_subset_ccRCC@meta.data$total_cell_per_patient
+
+## normalizing T abundance
+Bi_seurat_md_na_tumor_subset_ccRCC@meta.data$normalized_CD8_totalcells <- Bi_seurat_md_na_tumor_subset_ccRCC@meta.data$total_T_Cell_only/Bi_seurat_md_na_tumor_subset_ccRCC@meta.data$total_cell_per_patient
+
+# normalized_CD8_actual_totalcells - really CD8 normalization (within study comparison)
+# normalized_CD8_totalcells - not really CD8 but T cell normalization (cross study comparison)
+
+
+```
+
+```{r}
+Bi_seurat_md_na_tumor_subset_ccRCC_MD <- Bi_seurat_md_na_tumor_subset_ccRCC@meta.data
+dat_Cohort <- data.frame(aggregate(cbind(sample_id == sample_id) ~  sample_id + pre_post + outcome, Bi_seurat_md_na_tumor_subset_ccRCC_MD, length))
+
+```
+
+## normalization - 1 log transformation
+```{r}
+seurat_analysis <- function(seurat.object) {
+  
+  seurat.object <- NormalizeData(seurat.object)
+  
+  seurat.object <- FindVariableFeatures(seurat.object)
+  
+  seurat.object <- ScaleData(seurat.object, features = rownames(seurat.object))
+  
+  seurat.object <- RunPCA(seurat.object)
+  
+  ElbowPlot(seurat.object)
+  
+  seurat.object <- FindNeighbors(seurat.object, dims = 1:20) #cryptic cluster with 10
+  
+  seurat.object <- FindClusters(seurat.object)
+  seurat.object <- RunUMAP(seurat.object, dims = 1:20)
+
+}
+
+Bi_seurat_md_na_tumor_subset_ccRCC <- seurat_analysis(Bi_seurat_md_na_tumor_subset_ccRCC)
+Bi_seurat_md_na <- seurat_analysis(Bi_seurat_md_na)
+saveRDS(Bi_seurat_md_na, "/mctp/share/users/gondal/01_scHLA/03_output/Kidney_Bi/version_06_01_02_22/Bi_seurat_md_na.RDS")
+
+# updated
+saveRDS(Bi_seurat_md_na_tumor_subset_ccRCC, "/mctp/share/users/gondal/01_scHLA/03_output/Kidney_Bi/version_06_01_02_22/Bi_seurat_md_na_tumor_subset_ccRCC.RDS")
+Bi_seurat_md_na_tumor_subset_ccRCC <- readRDS("/mctp/share/users/gondal/01_scHLA/03_output/Kidney_Bi/version_06_01_02_22/Bi_seurat_md_na_tumor_subset_ccRCC.RDS")
+#Bi_seurat_md_na_tumor_subset_ccRCC <- saveRDS("/mctp/share/users/gondal/01_scHLA/03_output/Kidney_Bi/version_05_12_30_22/Bi_seurat_md_na_tumor_subset_ccRCC.RDS")
+```
+
