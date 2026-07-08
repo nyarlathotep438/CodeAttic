@@ -1,0 +1,9 @@
+from manim import *
+
+class HelloWorld(Scene):
+    def construct(self):
+        text = Text("Hello, Manim!").scale(2)
+        self.play(Write(text))  # 逐字写入动画
+        self.wait(2)
+        self.play(text.animate.shift(UP*2))  # 向上移动
+        self.play(FadeOut(text))  # 淡出

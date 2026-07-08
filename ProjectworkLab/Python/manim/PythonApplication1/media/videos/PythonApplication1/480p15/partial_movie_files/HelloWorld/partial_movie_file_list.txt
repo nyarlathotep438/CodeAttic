@@ -1,0 +1,5 @@
+# This file is used internally by FFMPEG.
+file 'file:C:/Users/Admin/CodeAttic/ProjectworkLab/Python/manim/PythonApplication1/media/videos/PythonApplication1/480p15/partial_movie_files/HelloWorld/1584795214_1910565897_223132457.mp4'
+file 'file:C:/Users/Admin/CodeAttic/ProjectworkLab/Python/manim/PythonApplication1/media/videos/PythonApplication1/480p15/partial_movie_files/HelloWorld/4072820271_2408024828_3999858560.mp4'
+file 'file:C:/Users/Admin/CodeAttic/ProjectworkLab/Python/manim/PythonApplication1/media/videos/PythonApplication1/480p15/partial_movie_files/HelloWorld/4072820271_2390973831_4038165512.mp4'
+file 'file:C:/Users/Admin/CodeAttic/ProjectworkLab/Python/manim/PythonApplication1/media/videos/PythonApplication1/480p15/partial_movie_files/HelloWorld/4072820271_2919770823_4038165512.mp4'
